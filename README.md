@@ -149,8 +149,8 @@ Tkinter is normally included with standard Python installations. On some Linux s
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/<github-username>/<repository-name>.git
-cd <repository-name>
+git clone https://github.com/ChandanIasri/DnLC.git
+cd DnLC
 ```
 
 ### 2. Create a Virtual Environment
@@ -191,7 +191,7 @@ pip install -r yolov5/requirements.txt
 Place the trained model file in:
 
 ```text
-models/best.pt
+models/Leaf_count.pt
 ```
 
 The expected model path should be updated in the application configuration or inference script when a different location is used.
@@ -203,7 +203,7 @@ The expected model path should be updated in the application configuration or in
 Run the following command from the root directory:
 
 ```bash
-python app/dnlc_gui.py
+python DnLC.py
 ```
 
 The graphical interface allows the user to:
@@ -217,163 +217,7 @@ The graphical interface allows the user to:
 
 ---
 
-## Command-Line Inference
 
-A single image can be analysed using:
-
-```bash
-python scripts/detect.py \
-    --weights models/best.pt \
-    --source sample_images/sample_plant.jpg \
-    --conf-thres 0.25 \
-    --save-txt \
-    --save-conf
-```
-
-For Windows Command Prompt, the command may be entered on one line:
-
-```bash
-python scripts/detect.py --weights models/best.pt --source sample_images/sample_plant.jpg --conf-thres 0.25 --save-txt --save-conf
-```
-
-The output will normally include:
-
-* Annotated image containing predicted bounding boxes.
-* Detection confidence for each leaf.
-* Text file containing prediction coordinates.
-* Total number of detected leaves.
-
----
-
-## Analysing a Folder of Images
-
-To analyse all compatible images in a folder:
-
-```bash
-python scripts/detect.py \
-    --weights models/Leaf_count.pt \
-    --source path/to/image_folder \
-    --conf-thres 0.25
-```
-
-The resulting predictions will be stored in the configured output directory, for example:
-
-```text
-runs/detect/exp/
-```
-
----
-
-## Training the Model
-
-### Dataset Organisation
-
-The YOLO-formatted dataset should follow a structure similar to:
-
-```text
-dataset/
-├── images/
-│   ├── train/
-│   ├── val/
-│   └── test/
-│
-└── labels/
-    ├── train/
-    ├── val/
-    └── test/
-```
-
-Each image must have a corresponding annotation file with the same base filename.
-
-Example:
-
-```text
-images/train/plant_001.jpg
-labels/train/plant_001.txt
-```
-
-### Annotation Format
-
-Each annotation line should contain:
-
-```text
-class_id x_center y_center width height
-```
-
-All coordinates must be normalised between 0 and 1.
-
-Because DnLC contains one detection class, the class identifier is:
-
-```text
-0
-```
-
-Example:
-
-```text
-0 0.516 0.428 0.162 0.205
-```
-
-### Dataset Configuration
-
-An example `dnlc.yaml` file is:
-
-```yaml
-path: /absolute/path/to/dataset
-
-train: images/train
-val: images/val
-test: images/test
-
-nc: 1
-
-names:
-  0: leaf
-```
-
-### Start Training
-
-```bash
-python scripts/train.py \
-    --img 640 \
-    --batch 16 \
-    --epochs 100 \
-    --data config/dnlc.yaml \
-    --weights yolov5s.pt \
-    --name dnlc_yolov5s
-```
-
-The parameters may be modified according to the available hardware, dataset size, and selected YOLOv5 model variant.
-
----
-
-## Model Validation
-
-Evaluate the trained model using:
-
-```bash
-python scripts/validate.py \
-    --weights models/best.pt \
-    --data config/dnlc.yaml \
-    --img 640 \
-    --task test
-```
-
-Recommended evaluation outputs include:
-
-* Precision
-* Recall
-* F1-score
-* mAP@0.50
-* mAP@0.50:0.95
-* Precision–recall curve
-* Confusion matrix
-* Representative detection outputs
-* Agreement between manual and automated leaf counts
-* Mean absolute error of leaf counting
-* Root mean squared error of leaf counting
-
----
 
 ## Confidence Threshold
 
