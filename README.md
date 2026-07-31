@@ -98,40 +98,19 @@ The repository may be organised as follows:
 
 ```text
 DnLC/
-│
+├── DnLC.py
+├── Leaf_count.pt
+├── requirements.txt
 ├── README.md
 ├── LICENSE
-├── CITATION.cff
-├── requirements.txt
-├── environment.yml
-│
-├── app/
-│   ├── dnlc_gui.py
-│   ├── inference.py
-│   └── utils.py
-│
-├── models/
-│   └── best.pt
-│
-├── scripts/
-│   ├── train.py
-│   ├── validate.py
-│   └── detect.py
-│
-├── config/
-│   └── dnlc.yaml
-│
-├── sample_images/
-│   └── sample_plant.jpg
-│
-├── results/
-│   ├── prediction_examples/
-│   ├── performance_metrics/
-│   └── plots/
-│
-└── docs/
-    ├── workflow.png
-    └── user_manual.pdf
+├── Screen.png
+├── dendrobium.png
+├── me.jpg
+├── icar_logo.png
+├── iasri_logo.png
+├── orchid_logo.png
+├── new_count_icon.png
+└── old_count_icon.png
 ```
 
 Modify this structure to match the actual organisation of the repository.
