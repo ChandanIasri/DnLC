@@ -1,0 +1,27 @@
+YOLOv5 source information
+
+Upstream project:
+Ultralytics YOLOv5
+
+Upstream repository:
+https://github.com/ultralytics/yolov5
+
+Exact commit:
+46d9a3c48ee08c5d2c9cb1a827d5462d1b24527c
+
+Short commit:
+46d9a3c
+
+Date incorporated into DnLC:
+2026-08-05
+
+Purpose:
+This fixed YOLOv5 source snapshot is included to support reproducible
+inference using the DnLC Leaf_count.pt model and DnLC.py application.
+
+Local modifications:
+None identified at the time of incorporation.
+
+Licence:
+The incorporated YOLOv5 source remains subject to the licence included
+in yolov5/LICENSE.
