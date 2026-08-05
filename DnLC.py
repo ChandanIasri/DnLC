@@ -1,1000 +1,1011 @@
-import customtkinter as ctk
-from PIL import Image
-import os
-import datetime
-import tkinter.filedialog as fd
-import csv
-import torch
-from PIL import Image
-import numpy as np
-import pathlib
-import tkinter as tk
-from tkinter import filedialog
-from PIL import Image, ImageTk
-import pandas as pd
-from tkinter import ttk
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
-from tkinter import filedialog, messagebox
-import threading
+#!/usr/bin/env python3
+"""
+DnLC: Dendrobium nobile Leaf Counter
 
-temp = pathlib.PosixPath
-pathlib.PosixPath = pathlib.WindowsPath
-image_array = []
-file_name_array=[]
-image_wise_sillique=[]
-results=[]
+A CustomTkinter desktop application for automated leaf detection and counting
+using a pinned YOLOv5 source tree and the trained Leaf_count.pt model.
+
+Expected project structure
+--------------------------
+DnLCApplication/
+├── DnLC.py
+├── Leaf_count.pt
+├── yolov5/
+│   ├── models/
+│   ├── utils/
+│   └── data/
+├── orchid_logo.png
+├── icar_logo.png
+├── iasri_logo.png
+├── new_count_icon.png
+└── old_count_icon.png
+
+Validated inference settings
+----------------------------
+Confidence threshold: 0.65
+IoU threshold: 0.45
+Inference size: 640
+"""
+
+from __future__ import annotations
+
+import csv
+import datetime as dt
+import os
+import pathlib
+import platform
+import subprocess
+import sys
+import threading
+import traceback
+from dataclasses import dataclass
+from typing import Any
+
+import customtkinter as ctk
+import cv2
+import numpy as np
+import tkinter as tk
+from PIL import Image, ImageOps
+from tkinter import filedialog, messagebox
+
+
+# ---------------------------------------------------------------------------
+# Cross-platform checkpoint compatibility
+# ---------------------------------------------------------------------------
+# Leaf_count.pt was created on Windows and may contain pathlib.WindowsPath
+# objects. Mapping WindowsPath to PosixPath allows it to load on macOS/Linux.
+if os.name == "nt":
+    pathlib.PosixPath = pathlib.WindowsPath
+else:
+    pathlib.WindowsPath = pathlib.PosixPath
+
+
+# ---------------------------------------------------------------------------
+# Project configuration
+# ---------------------------------------------------------------------------
+BASE_DIR = pathlib.Path(__file__).resolve().parent
+YOLOV5_DIR = BASE_DIR / "yolov5"
+WEIGHTS_PATH = BASE_DIR / "Leaf_count.pt"
+DATA_YAML_PATH = YOLOV5_DIR / "data" / "coco128.yaml"
+COUNTS_DIR = BASE_DIR / "Counts"
+
+CONFIDENCE_THRESHOLD = 0.65
+IOU_THRESHOLD = 0.45
+INFERENCE_SIZE = 640
+MAX_DETECTIONS = 1000
+
+APP_TITLE = "DnLC Application"
+WINDOW_SIZE = "900x620"
+
+
+@dataclass(frozen=True)
+class CountResult:
+    image_name: str
+    leaf_count: int
+    output_file: str
+
+
 class App(ctk.CTk):
-    def __init__(self):
+    """Main DnLC graphical application."""
+
+    def __init__(self) -> None:
         super().__init__()
 
-        # Window Configuration
-        self.title("DnLC Application")
-        self.geometry("800x500")
-        self.configure(fg_color="#8B0000")  # Dark red/maroon background
-        # self.resizable(False, False)
-
-        # Set window icon (PNG format)
-        icon = tk.PhotoImage(file="orchid_logo.png")  # Replace with your icon path
-        self.wm_iconphoto(True, icon)
-        # Splash Screen Setup
-        self.splash_screen()
-
-    def splash_screen(self):
-        # Create a Splash Frame
-        self.splash_frame = ctk.CTkFrame(self, fg_color="#8B0000")  # Dark red/maroon
-        self.splash_frame.pack(fill="both", expand=True)
-
-        # Add Logos or App Title
-        splash_label = ctk.CTkLabel(
-            self.splash_frame,
-            text="Welcome to DnLC Application",
-            font=("Arial", 24, "bold"),
-            text_color="white",
-        )
-        splash_label.pack(pady=150)
-
-        # Progress Bar (Dynamic)
-        self.progress_bar = ctk.CTkProgressBar(self.splash_frame, width=300, height=20, corner_radius=10)
-        self.progress_bar.pack(pady=30)
-        self.progress_bar.set(0)  # Initialize to 0%
-
-        # Start Progress Bar Animation
-        self.update_progress()
-
-    def update_progress(self):
-        progress = self.progress_bar.get()  # Get current progress
-        if progress < 1.0:  # Continue updating until full
-            self.progress_bar.set(progress + 0.01)  # Increment progress
-            self.after(50, self.update_progress)  # Update every 50ms
-        else:
-            self.show_home_screen()  # Transition to the main app
-
-    def show_home_screen(self):
-        # Remove Splash Frame
-        self.splash_frame.pack_forget()
-
-        # Create Main Application Frames
-        self.nav_bar()
-        self.create_frames()
-
-    def nav_bar(self):
-        # Navigation Bar
-        self.nav_frame = ctk.CTkFrame(self, height=50, fg_color="darkred", corner_radius=0)
-        self.nav_frame.pack(fill="x", side="top")
-
-        # self.nav_buttons = ["Home", "Leaf Count", "Image Upload", "MGIDI", "Contact Us"]
-        self.nav_buttons = ["Home", "Leaf Count", "MGIDI", "Contact Us"]
-        self.frames = {}
-
-        for idx, btn_text in enumerate(self.nav_buttons):
-            btn = ctk.CTkButton(
-                self.nav_frame,
-                text=btn_text,
-                font=("Arial", 14),
-                fg_color="#8B0000" if idx != 0 else "red",
-                hover_color="darkred",
-                corner_radius=5,
-                width=120,
-                command=lambda name=btn_text: self.show_frame(name),
-            )
-            btn.grid(row=0, column=idx, padx=5, pady=10)
-
-        # Footer
-        # Load the logos
-        logo_left = Image.open("icar_logo.png").resize((50, 50))  # Adjust size as needed
-        logo_right = Image.open("iasri_logo.png").resize((50, 50))  # Adjust size as needed
-
-        logo_left_img = ImageTk.PhotoImage(logo_left)
-        logo_right_img = ImageTk.PhotoImage(logo_right)
-        self.footer_frame = ctk.CTkFrame(self, fg_color="#8B0000")  # Footer in dark red/maroon
-        self.footer_frame.pack(side="bottom", pady=5, fill="x")
-        # Left logo
-        self.footer_logo_left = ctk.CTkLabel(
-            self.footer_frame,
-            image=logo_left_img,
-            text=""  # No text, only image
-        )
-        self.footer_logo_left.pack(side="left", padx=10, pady=5)
-
-        self.footer = ctk.CTkLabel(
-            self.footer_frame,
-            text="© 2025 Copyright: All Rights Reserved\nICAR - Indian Agricultural Statistics Research Institute, New Delhi",
-            font=("Arial", 12),
-            text_color="white",
-            justify="center",
-        )
-        self.footer.pack(side="left", expand=True, pady=5)
-        # Right logo
-        self.footer_logo_right = ctk.CTkLabel(
-            self.footer_frame,
-            image=logo_right_img,
-            text=""  # No text, only image
-        )
-        self.footer_logo_right.pack(side="right", padx=10, pady=5)
-
-    def create_frames(self):
-        # Create all frames and store them in the dictionary
-        for name in self.nav_buttons:
-            frame = ctk.CTkFrame(self, fg_color="white", corner_radius=15)
-            self.frames[name] = frame
-
-            # Add unique content to each frame
-            if name == "Home":
-                # label = ctk.CTkLabel(frame, text="Welcome to DnLC Application", font=("Arial", 18, "bold"), text_color="black")
-                # label.pack(pady=50)
-                self.go_to_home(frame)
-            elif name == "Leaf Count":
-                self.create_basic_info_content(frame)
-                # self.create_image_upload_content(frame)
-                # label = ctk.CTkLabel(frame, text="Basic Information Screen", font=("Arial", 18, "bold"), text_color="black")
-                # label.pack(pady=50)
-            elif name == "Image Upload":
-                self.create_image_upload_content(frame)
-            elif name == "MGIDI":
-                label = ctk.CTkLabel(frame, text="MGIDI Functionality Under Development", font=("Arial", 18, "bold"), text_color="black")
-                label.pack(pady=50)
-                # self.MGIDI(frame)
-            elif name == "Contact Us":
-                # label = ctk.CTkLabel(frame, text="Help Screen", font=("Arial", 18, "bold"), text_color="black")
-                # label.pack(pady=50)
-                self.show_contact_us(frame)
-
-
-        # Show the initial frame (Home)
-        self.show_frame("Home")
-
-    def show_frame(self, name):
-        # Hide all frames
-        for frame in self.frames.values():
-            frame.pack_forget()
-
-        # Show the selected frame
-        self.frames[name].pack(fill="both", expand=True, padx=20, pady=20)
-
-    def create_image_upload_content(self, frame):
-        # Add fields for the Image Upload screen
-        for widget in frame.winfo_children():
-            widget.destroy()
-
-            # Add unique ID label and value
-        unique_id_frame = ctk.CTkFrame(frame)  # Frame for grouping the label and value
-        unique_id_frame.pack(fill="x", pady=5, padx=10)
-
-        unique_id_label = ctk.CTkLabel(unique_id_frame, text="Batch ID:", font=("Arial", 16), text_color="black")
-        unique_id_label.pack(side="left", padx=5)
-
-        unique_id_value = ctk.CTkLabel(unique_id_frame, text="Auto-generated", font=("Arial", 16, "italic"),
-                                       text_color="gray")
-        unique_id_value.pack(side="left", padx=5)
-
-        # Add species label and entry
-        species_frame = ctk.CTkFrame(frame)  # Frame for grouping the label and entry
-        species_frame.pack(fill="x", pady=5, padx=10)
-
-        species_label = ctk.CTkLabel(species_frame, text="SPECIES:", font=("Arial", 16), text_color="black")
-        species_label.pack(side="left", padx=5)
-
-        species_entry = ctk.CTkEntry(species_frame, width=200, font=("Arial", 14))
-        species_entry.pack(side="left", padx=5)
-
-        # # Add images/plants label and entry
-        # images_frame = ctk.CTkFrame(frame)  # Frame for grouping the label and entry
-        # images_frame.pack(fill="x", pady=5, padx=10)
-        #
-        # images_label = ctk.CTkLabel(images_frame, text="No. of images/plants:", font=("Arial", 16), text_color="black")
-        # images_label.pack(side="left", padx=5)
-        #
-        # images_entry = ctk.CTkEntry(images_frame, width=200, font=("Arial", 14))
-        # images_entry.pack(side="left", padx=5)
-        # Add a submit button
-        global submit_button
-        # submit_button = ctk.CTkButton(
-        #     frame,
-        #     text="Submit",
-        #     command=lambda: self.submit_basic_info(
-        #         unique_id_value.cget("text"),
-        #         species_entry.get(),
-        #         images_entry.get(),frame
-        #     ),
-        # )
-        # submit_button.pack(pady=20)
-        submit_button = ctk.CTkButton(
-            frame,
-            text="Open Image Folder",
-            command=lambda: self.submit_basic_info(
-                unique_id_value.cget("text"),
-                species_entry.get(),
-                 frame
-            ),fg_color="#800000", hover_color="#A52A2A"
-        )
-        submit_button.pack(pady=20)
-        back_button = ctk.CTkButton(frame, text="Back to Leaf Count",command=lambda: self.create_basic_info_content(frame), fg_color="#800000",hover_color="#A52A2A")
-        back_button.pack(pady=10)
-
-
-    def create_basic_info_content(self,frame):
-    # Clear the frame (if needed)
-        for widget in frame.winfo_children():
-            widget.destroy()
-
-    # Title Label
-        title_label = ctk.CTkLabel(
-        frame,
-        text="Leaf Count",
-        font=("Arial", 18, "bold"),
-        text_color="black"
-        )
-        title_label.pack(pady=20)
-
-    # Option 1: New Count
-        new_count_icon = ctk.CTkImage(light_image=Image.open("new_count_icon.png"), size=(120, 35))
-        new_count_button = ctk.CTkButton(
-        frame,
-        image=new_count_icon,
-        text="New Count",
-        compound="top",  # Icon on top of the text
-        font=("Arial", 14),
-        fg_color="#8B0000",
-        hover_color="darkred",
-        command=lambda: self.create_image_upload_content(frame),
-        )
-        new_count_button.pack(pady=10)
-
-    # Option 2: Old Count
-        old_count_icon = ctk.CTkImage(light_image=Image.open("old_count_icon.png"), size=(120, 35))
-        old_count_button = ctk.CTkButton(
-        frame,
-        image=old_count_icon,
-        text="Old Count",
-        compound="top",  # Icon on top of the text
-        font=("Arial", 14),
-        fg_color="#8B0000",
-        hover_color="darkred",
-        command=lambda: self.create_old_project_opening(frame),#print("Old Count Selected"),
-        )
-        old_count_button.pack(pady=10)
-
-    def submit_basic_info(self, unique_id, species,frame):
-        # Step 1: Generate a unique folder name
-        # Back button
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        folder_name = f"Count_{timestamp}"
-
-        # Base directory where folders will be created
-        base_directory = os.path.join(os.getcwd(), "Counts")
-
-        # Full path for the new folder
-        folder_path = os.path.join(base_directory, folder_name)
-
-        # Step 2: Create the folder if it doesn't exist
-        os.makedirs(folder_path, exist_ok=True)
-        print("The folder path variable contains", folder_path)
-
-        # Step 3: Save the input data into a text file in the folder
-        info_file_path = os.path.join(folder_path, "basic_info.txt")
-        with open(info_file_path, "w") as file:
-            file.write(f"UNIQUE ID: {unique_id}\n")
-            file.write(f"SPECIES: {species}\n")
-            # file.write(f"No. of Images/Plants: {num_images}\n")
-
-        current_folder_path=os.path.join("current_folder.txt")
-        with open(current_folder_path, "w") as file:
-            file.write(folder_path)
-        # Display confirmation to the user
-        print(f"Folder '{folder_name}' created successfully at {folder_path}.")
-        print(f"Basic info saved in '{info_file_path}'.")
-
-        # Additional logic: For example, redirect to image upload or counting process
-        self.start_image_upload_process(folder_path,frame)
-
-    def start_image_upload_process(self, folder_path,frame):
-        # Step 1: Ask the user to upload multiple images
-        filename = fd.askopenfilenames(
-            title="Select Images",
-            filetypes=[("Image files", "*.jpg *.jpeg *.png")]
-        )
-
-        if not filename:
-            print("No images selected.")
-            return
-        col = 1  # start from column 1
-        row = 3  # start from row 3
-        for f in filename:
-            img = Image.open(f)  # read the image file
-            file_name = os.path.basename(f)
-            image_array.append(img)
-            file_name_array.append(file_name)
-            img = img.resize((100, 100))  # new width & height
-            img = ImageTk.PhotoImage(img)
-            # e1 = tk.Label(my_w)
-            # e1.grid(row=row, column=col)
-            # e1.image = img  # keep a reference! by attaching it to a widget attribute
-            # e1['image'] = img  # Show Image
-            # if (col == 3):  # start new line after third column
-            #     row = row + 1  # start wtih next row
-            #     col = 1  # start with first column
-            # else:  # within the same row
-            #     col = col + 1  # increase to next column
-
-        print(f"Selected images: {filename}")
-        print('Number of images selected',len(filename))
-        # Reset the progress bar
-        # submit_button.configure(state=ctk.DISABLED)
-        # Progress bar
-        self.progress_bar = ctk.CTkProgressBar(frame, width=300)
-        self.progress_bar.pack(pady=10)
-        self.progress_bar.set(0)  # Set progress to 0 initially
-        submit_button = ctk.CTkButton(frame, text="Count Leaf",command=lambda: self.start_analysis(folder_path), fg_color="#800000",hover_color="#A52A2A")
-        submit_button.pack(pady=20)
-        # label = ctk.CTkLabel(frame, text="Counting Completed", font=("Arial", 18, "bold"),text_color="black")
-        # label.pack(pady=50)
-        # Progress Bar (Dynamic)
-        # Step 2: Load the pre-trained model
-        # model_path = "Leaf_count.pt"  # Update this with the path to your .pt file
-        # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        # model = torch.load(model_path, map_location=device,weights_only=False)
-        # print(model.keys())
-        # model=model['model'].to(device)
-        # model.eval()
-        # # Check if the model is in FP16
-        # if next(model.parameters()).dtype == torch.float16:
-        #     model = model.half()  # Ensure model is in FP16 if its weights are in HalfTensor
-        #
-        # # Step 3: Process each image and count leaves
-        # results = []
-        # for img_path in filename:
-        #     # Load and preprocess the image
-        #     image = Image.open(img_path).convert("RGB")
-        #     image = image.resize((224, 224))  # Resize based on your model's input requirements
-        #     image_tensor = torch.tensor(np.array(image)).permute(2, 0, 1).unsqueeze(0).float() / 255.0
-        #     image_tensor = image_tensor.to(device)
-        #     # Match input type with model weight type
-        #     if next(model.parameters()).dtype == torch.float16:
-        #         image_tensor = image_tensor.half()  # Convert input to HalfTensor for FP16
-        #     else:
-        #         image_tensor = image_tensor.float()  # Ensure input is FloatTensor for FP32
-        #
-        #     image_tensor = image_tensor.to(device)  # Move input to the same device as the model
-        #
-        #     # Predict leaf count
-        #     with torch.no_grad():
-        #         output = model(image_tensor)  # Model prediction
-        #         print(output)
-        #         print(type(output))
-        #
-        #         # If output is a tuple, access the correct element
-        #         # print('output from the model',output[0])
-        #         if isinstance(output, tuple):
-        #             predictions = output[0]  # Adjust based on your model's structure
-        #         else:
-        #             predictions = output
-        #         # Confidence threshold
-        #         # confidence_threshold = 0.50
-        #
-        #         # Extract the confidence scores (assumed in column 4 here)
-        #         # print('prediction is',predictions)
-        #         # print('confidence score',predictions[:, 1])
-        #         # confidence_scores = predictions[:, 4]
-        #         # print('Prediction shape',predictions.shape)
-        #         # print('Prediction shape',predictions[0])
-        #         # Extract confidence scores and class predictions
-        #         confidence_scores = predictions[0, :, 4]  # Confidence at index 4
-        #         class_predictions = predictions[0, :, 5]  # Class labels at index 5
-        #         print('classs label',class_predictions)
-        #
-        #         # Define confidence threshold and leaf class ID
-        #         confidence_threshold = 0.81  # Adjust if needed
-        #         leaf_class_id = 1  # Change based on your dataset
-        #
-        #         # Filter valid detections
-        #         valid_detections = (confidence_scores > confidence_threshold) & (class_predictions == leaf_class_id)
-        #         print('Valid detection',valid_detections)
-        #         # valid_detections = (confidence_scores > confidence_threshold)
-        #         # Count detected leaves
-        #         leaf_count = valid_detections.sum().item()
-        #         print(f"Number of leaves detected: {leaf_count}")
-        #
-        #         # print(confidence_scores)
-        #
-        #         # Count detections above the threshold
-        #         # valid_detections = confidence_scores > confidence_threshold
-        #         # print('valid detection',valid_detections)
-        #         # leaf_count = valid_detections.sum().item()  # Count of valid detections
-        #         # leaf_count = len(output)  # Count of valid detections
-        #
-        #         # print(f"Number of leaves detected: {leaf_count}")
-        #         # print('leaf count prediction', predictions)
-        #         # print('leaf count prediction type',type(predictions))
-        #         # # Handle multiple predictions
-        #         # # leaf_counts = predictions.argmax(dim=0)  # Tensor of predicted classes
-        #         # leaf_counts = predictions[:, 0].size(0)  # Tensor of predicted classes
-        #         # print('Value of leaf count', leaf_counts)
-        #         # for i, leaf_count in enumerate(leaf_counts):
-        #         #     print(f"Leaf count for image {i}: {int(leaf_count.item())}")
-        #         results.append({"Image": img_path, "Leaf Count": leaf_count})
-        #
-
-        #
-        # print(f"Results saved to '{csv_path}'.")
-        # submit_button.configure(state=ctk.NORMAL)
-        # app.display_results(results,frame)
-
-    def display_results(self, data_array, frame1):
-        global result_label
-        result_label = ctk.CTkLabel(frame1, text="Loading results...")
-        result_label.pack(pady=10)
-
-        result_label.configure(text="Results displayed below.")
-        back_button = ctk.CTkButton(frame1, text="Back to Leaf Count",
-                                    command=lambda: self.create_basic_info_content(frame1), fg_color="#800000",
-                                    hover_color="#A52A2A")
-        back_button.pack(pady=20)
-
-        global result_frame
-        result_frame = ctk.CTkFrame(frame1, width=800, height=300, corner_radius=10)
-        result_frame.pack(expand=True, fill=tk.BOTH, padx=10, pady=10)
-
-        if not data_array or len(data_array) < 2:
-            result_label.configure(text="Error: No data available.")
-            return
-
-        # Extract column headers from first row
-        column_names = data_array[0]
-        data_rows = data_array[1:]
-
-        # Add scrollbars
-        scroll_y = tk.Scrollbar(result_frame, orient=tk.VERTICAL)
-        scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
-
-        scroll_x = tk.Scrollbar(result_frame, orient=tk.HORIZONTAL)
-        scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
-
-        # Create a treeview to display the data
-        tree = ttk.Treeview(result_frame, columns=column_names, show="headings", yscrollcommand=scroll_y.set,
-                            xscrollcommand=scroll_x.set)
-        tree.pack(expand=True, fill=tk.BOTH, padx=10, pady=10)
-
-        # Configure scrollbars
-        scroll_y.config(command=tree.yview)
-        scroll_x.config(command=tree.xview)
-
-        # Define column headers
-        for col in column_names:
-            tree.heading(col, text=col)
-            tree.column(col, anchor="center", width=100)  # Adjust column width as needed
-
-        # Add data rows
-        for row in data_rows:
-            tree.insert("", "end", values=row)
-
-
-    def create_old_project_opening(self,frame):
-        # Destroy existing widgets in frame
-        for widget in frame.winfo_children():
-            widget.destroy()
-
-        # Back button
-        back_button = ctk.CTkButton(frame, text="Back to Leaf Count",command=lambda: self.create_basic_info_content(frame),fg_color="#800000", hover_color="#A52A2A")
-        back_button.pack(pady=10)
-
-        # Top frame for buttons
-        top_frame = ctk.CTkFrame(frame, corner_radius=10)
-        top_frame.pack(side=ctk.TOP, fill=ctk.X, pady=5, padx=10)
-
-        btn_open = ctk.CTkButton(top_frame, text="Open Task Folder", command=self.open_folder,fg_color="#800000", hover_color="#A52A2A")
-        btn_open.pack(side=ctk.LEFT, padx=5, pady=5)
-
-        # Left frame for file list
-        left_frame = ctk.CTkFrame(frame, corner_radius=10)
-        left_frame.pack(side=ctk.LEFT, fill=ctk.Y, padx=10, pady=10)
-
-        global listbox_frame
-        listbox_frame = ctk.CTkFrame(left_frame, corner_radius=10)
-        listbox_frame.pack(fill=ctk.BOTH, expand=True, padx=5, pady=5)
-
-        global file_listbox
-        file_listbox = tk.Listbox(listbox_frame, height=20, width=30, bg="#2c2c2c", fg="white",
-                                  selectbackground="#1f538d",
-                                  highlightthickness=0, borderwidth=0)
-        file_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
-        file_listbox.bind('<<ListboxSelect>>', self.show_file_content)
-
-        scrollbar = ctk.CTkScrollbar(listbox_frame, command=file_listbox.yview)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        file_listbox.config(yscrollcommand=scrollbar.set)
-
-        # Right frame for content preview
-        global content_frame
-        content_frame = ctk.CTkFrame(frame, corner_radius=10)
-        content_frame.pack(side=ctk.RIGHT, fill=ctk.BOTH, expand=True, padx=10, pady=10)
-
-        self.image_label = ctk.CTkLabel(content_frame, text="No Image Selected", width=400, height=300)
-        self.image_label.pack(expand=True)
-
-    def open_folder(self):
-        # folder_selected = filedialog.askdirectory()
-        with open("current_folder.txt", "r") as file:
-            first_line = file.readline().strip()
-            print(first_line)
-        # if folder_selected:
-        self.selected_folder = first_line
-            # print(folder_selected)
-        self.list_files()
-
-    def list_files(self):
-        """ Populate listbox with image files from selected folder. """
-        file_listbox.delete(0, tk.END)  # Clear previous items
-        if self.selected_folder:
-            for file in os.listdir(self.selected_folder):
-                if file.lower().endswith(
-                        ('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.txt', '.csv')):  # Filter image files
-                    file_listbox.insert(tk.END, file)
-
-    def show_file_content(self, event):
-        """ Display selected file content based on type (image or text). """
-        selected_index = file_listbox.curselection()
-        if selected_index:
-            filename = file_listbox.get(selected_index[0])
-            file_path = os.path.join(self.selected_folder, filename)
-
-            # Clear previous content in the right panel
-            for widget in content_frame.winfo_children():
-                widget.destroy()
-
-            # Handle Image Files
-            if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
-                img = Image.open(file_path)
-                img.thumbnail((400, 300))  # Resize to fit
-                img_ctk = ctk.CTkImage(light_image=img, dark_image=img, size=(400, 300))
-
-                image_label = ctk.CTkLabel(content_frame, image=img_ctk, text="")
-                image_label.image = img_ctk  # Prevent garbage collection
-                image_label.pack(expand=True)
-
-            # Handle Text & CSV Files
-            elif filename.lower().endswith(('.txt', '.csv')):
-                with open(file_path, "r", encoding="utf-8") as file:
-                    content = file.read()
-
-                text_box = ctk.CTkTextbox(content_frame, width=400, height=300, wrap="word")
-                text_box.insert("1.0", content)
-                text_box.configure(state="disabled")  # Make it read-only
-                text_box.pack(expand=True, fill="both", padx=5, pady=5)
-
-    def analyze_image(self,folder_path):
-        # model = torch.load('C:/Users/lab/PycharmProjects/MustardSilliqueCounter/best.pt')
-        i = 0
-        pad = 0
-        # user_name = Label(my_w,text="Username").place(x=40,y=60)
-        for image in image_array:
-            # print('In analyse image function',image)
-            import os
-            import sys
-            from pathlib import Path
-            import time
-            import numpy as np
-            import cv2
-            import torch
-            import torch.backends.cudnn as cudnn
-            import io
-            import base64
-            import datetime
-
-            # ROOT = 'C:/Users/lab/PycharmProjects/MustardSilliqueCounter/yolov5'
-            ROOT = './yolov5'
-            if str(ROOT) not in sys.path:
-                sys.path.append(str(ROOT))  # add ROOT to PATH
-            ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
-
-            import argparse
-            import os
-            import sys
-            from pathlib import Path
-
-            import torch
-
-            from models.common import DetectMultiBackend
-
-            import utils
-            from utils.augmentations import letterbox
-            from models.common import DetectMultiBackend
-            from utils.dataloaders import IMG_FORMATS, VID_FORMATS, LoadImages, LoadStreams
-            from utils.general import (LOGGER, check_file, check_img_size, check_imshow, check_requirements, colorstr,
-                                       increment_path, non_max_suppression, print_args, scale_boxes, strip_optimizer,
-                                       xyxy2xywh)
-            from utils.plots import Annotator, colors, save_one_box
-            from utils.torch_utils import select_device, time_sync
-            import cv2
-            from PIL import Image
-            import time
-
-            from scipy.spatial import distance as dist
-
-            import argparse
-            # import imutils
-            import time
-            # import dlib
-            import time
-            from threading import Thread
-            import math
-            import cv2
-            # import playsound
-            import numpy as np
-            import threading
-
-            import cv2
-            import numpy as np
-            import pandas as pd
-            import csv
-            import numpy
-            from datetime import datetime
-
-            import math
-
-            # from imutils.video import VideoStream
-            # from imutils import face_utils
-
-            device = select_device('cpu')  # Set 0 if you have GPU
-            model = DetectMultiBackend('./Leaf_count.pt', device=device, dnn=False, data='data/coco128.yaml')
-            model.classes = [0, 2]
-            stride, names, pt, jit, onnx, engine = model.stride, model.names, model.pt, model.jit, model.onnx, model.engine
-            imgsz = check_img_size((640, 640), s=stride)  # check image size
-
-            def draw_rect(image, points):
-                x1 = int(points[0])
-                y1 = int(points[1])
-                x2 = int(points[2])
-                y2 = int(points[3])
-                midpoint = (int((x2 + x1) / 2), int((y2 + y1) / 2))
-                print(midpoint)
-                # print("Hi")
-                cv2.rectangle(image, (x1, y1), (x2, y2), color=(255, 90, 90), thickness=4)
-                cv2.circle(image, midpoint, radius=9, color=(0, 33, 45), thickness=-1)
-                y_mid = int(y2 + y1 / 2)
-                return image, y_mid
-
-            def yolo(img):
-                img0 = img.copy()
-                img = letterbox(img0, 640, stride=stride, auto=True)[0]
-                img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
-                img = np.ascontiguousarray(img)
-                im = torch.from_numpy(img).to(device)
-                im = im.float()  # uint8 to fp16/32
-                im /= 255  # 0 - 255 to 0.0 - 1.0
-                if len(im.shape) == 3:
-                    im = im[None]  # expand for batch dim
-                dt = [0.0, 0.0, 0.0]
-                pred = model(im, augment=False, visualize=False)
-                seen = 0
-                pred = non_max_suppression(pred, conf_thres=0.45, iou_thres=0.45, classes=[0, 1, 2, 3, 4, 6],
-                                           max_det=1000)
-                det = pred[0]
-                det[:, :4] = scale_boxes(im.shape[2:], det[:, :4], img0.shape).round()
-                prediction = pred[0].cpu().numpy()
-                for i in range(prediction.shape[0]):
-                    imag, mid = draw_rect(img0, prediction[i, :])
-                return imag, mid
-
-            def custom_infer(img0,
-                             weights='./Leaf_count.pt',  # model.pt path(s),
-                             data='data/coco128.yaml',  # dataset.yaml path
-                             imgsz=(640, 640),  # inference size (height, width)
-                             conf_thres=0.35,  # confidence threshold
-                             iou_thres=0.45,  # NMS IOU threshold
-                             max_det=1000,  # maximum detections per image  # cuda device, i.e. 0 or 0,1,2,3 or cpu
-                             view_img=False,  # show results
-                             save_txt=False,  # save results to *.txt
-                             save_conf=False,  # save confidences in --save-txt labels
-                             save_crop=False,  # save cropped prediction boxes
-                             nosave=False,  # do not save images/videos
-                             classes=[0, 1, 2, 3, 4, 6, 8, 10, 12],  # filter by class: --class 0, or --class 0 2 3
-                             agnostic_nms=False,  # class-agnostic NMS
-                             augment=False,  # augmented inference
-                             visualize=False,  # visualize features
-                             update=False,  # update all models
-                             project=ROOT / 'runs/detect',  # save results to project/name
-                             name='exp',  # save results to project/name
-                             exist_ok=False,  # existing project/name ok, do not increment
-                             line_thickness=5,  # bounding box thickness (pixels)
-                             hide_labels=True,  # hide labels
-                             hide_conf=False,  # hide confidences
-                             half=False,  # use FP16 half-precision inference
-                             dnn=False,  # use OpenCV DNN for ONNX inference
-                             model=model):
-                img = letterbox(img0, 640, stride=stride, auto=True)[0]
-
-                # Convert
-                img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
-                img = np.ascontiguousarray(img)
-                im = torch.from_numpy(img).to(device)
-                im = im.float()  # uint8 to fp16/32
-                im /= 255  # 0 - 255 to 0.0 - 1.0
-                if len(im.shape) == 3:
-                    im = im[None]  # expand for batch dim
-                dt = [0.0, 0.0, 0.0]
-                pred = model(im, augment=augment, visualize=visualize)
-                seen = 0
-                if 1 < 2:
-
-                    # NMS
-                    pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
-
-                    # Process predictions
-                    for i, det in enumerate(pred):  # per image
-                        seen += 1
-                        p, im0, frame = "Leaf.jpg", img0.copy(), 0
-
-                        p = Path(p)  # to Path
-                        imc = im0.copy() if save_crop else im0  # for save_crop
-                        annotator = Annotator(im0, line_width=line_thickness, example=str(names))
-                        if len(det):
-                            # Rescale boxes from img_size to im0 size
-                            det[:, :4] = scale_boxes(im.shape[2:], det[:, :4], im0.shape).round()
-
-                            # Print results
-                            for c in det[:, -1].unique():
-                                n = (det[:, -1] == c).sum()  # detections per class
-
-                            # Write results
-                            sillique = 0
-                            for *xyxy, conf, cls in reversed(det):
-                                if save_txt:  # Write to file
-
-                                    xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(
-                                        -1).tolist()  # normalized xywh
-                                    line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
-                                    with open(txt_path + '.txt', 'a') as f:
-                                        f.write(('%g ' * len(line)).rstrip() % line + '\n')
-
-                                if 1 < 2:  # Add bbox to image
-                                    sillique += 1
-                                    c = int(cls)  # integer class
-                                    # label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
-                                    label = None if hide_labels else (names[c] if hide_conf else f'{names[c]}')
-                                    annotator.box_label(xyxy, label, color=colors(c, True))
-                                    if save_crop:
-                                        save_one_box(xyxy, imc, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg',
-                                                     BGR=True)
-                        text = p.name + 'Leaf Count' + str(sillique)
-                        # print(file_name_array[i]+"**********"+str(sillique)+"**************************************")
-                        results.append({"Image": file_name_array[i], "Leaf Count": str(sillique)})
-                        image_wise_sillique.append(sillique)
-                        # Stream results
-                        # Stream results
-                        # font
-                        font = cv2.FONT_HERSHEY_SIMPLEX
-
-                        # org
-                        org = (50, 100)
-
-                        # fontScale
-                        fontScale = 1
-
-                        # Red color in BGR
-                        color = (0, 0, 255)
-
-                        # Line thickness of 2 px
-                        thickness = 2
-                        im0 = cv2.putText(im0, text, org, font, fontScale, color, thickness, cv2.LINE_AA, False)
-                        im0 = annotator.result()
-                print(file_name_array[i] + "**********" + str(sillique) + "**************************************")
-                return im0, pred
-
-            from matplotlib import pyplot as plt
-
-            def my_resize(img):
-                scale_percent = 10  # percent of original size
-                width = int(img.shape[1] * scale_percent / 100)
-                height = int(img.shape[0] * scale_percent / 100)
-                dim = (width, height)
-
-                # resize image
-                resized = cv2.resize(img, dim, interpolation=cv2.INTER_AREA)
-                return resized
-
-            # In[8]:
-
-            # import the opencv library
-            import cv2
-            import time
-            from datetime import datetime
-
-            print("Im before while Loop")
-            window_name = "window"
-            # vid = cv2.VideoCapture(0)
-            # cv2.namedWindow(window_name, cv2.WND_PROP_FULLSCREEN)
-            # cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-
-            print("Im before while Loop 2")
-
-            start = time.time()
-            # img_for_test = cv2.imread('./DSC_0001.JPG')
-            img_for_test = image  # cv2.imread('./DSC_0001.JPG')
-            # print("Im inside the loop",image)
-            # ret, frame = vid.read()
-            frame = img_for_test
-            frame = numpy.array(frame)
-            frame = frame[:, :, ::-1].copy()
-            print("Frame is ", type(frame))
-            print("Frame shape ", frame.shape)
-
-            # Image returned by yolo with classesQQ
-            pred_img = custom_infer(img0=frame)[0]
-            print(pred_img, "Predicted image")
-            # detected classes returned by Yolo
-            detected_classes = custom_infer(img0=frame)[1]
-            detected_classes
-            classses = detected_classes[:][0].cpu().numpy()[:, -1]
-
-            # cv2.imshow('ceh', pred_img)
-            cv2.imwrite(folder_path+"/output_image" + str(i) + ".jpg", pred_img)  # Save the image
-            print('Image Succesfully saved')
-            # vid.release()
-            # cv2.destroyAllWindows()
-
-            # exec(open('detect.py').read())
-            # print(type(image))
-            # user_name = Label(my_w,text=file_name_array[i] + "Sillique Count" + str(image_wise_sillique[i]) + "\n").place(x=40, y=60 + pad)
-            # user_name = Label(my_w, text=file_name_array[i] + "\n")
-            i += 1
-            pad += 20
-        self.progress_bar.stop()  # Stop progress animation
-        self.progress_bar.set(1)  # Set progress to 100% (completed) vcf
-        resultspath=folder_path+"/"+"leaf_count_results.csv"
-        # app.display_results(folder_path,frame)
-        # Step 4: Save the results to a CSV file in the folder
-        csv_path = os.path.join(folder_path, "leaf_count_results.csv")
-        with open(csv_path, mode="w", newline="") as csv_file:
-            writer = csv.DictWriter(csv_file, fieldnames=["Image", "Leaf Count"])
-            writer.writeheader()
-            writer.writerows(results)
-        #
-        # print(f"Results saved to '{csv_path}'.")
-        # submit_button.configure(state=ctk.NORMAL)
-        # app.display_results(csv_path,frame)
-        # app.display_results(results, frame)
-
-    def MGIDI(self,frame):
-        # Upload Section
-        tk.Button(frame, text="Upload Dataset", command=app.upload_file).pack(pady=10)
-
-        # Compute MGIDI Button
-        tk.Button(frame, text="Compute MGIDI", command=app.compute_mgidi(frame)).pack(pady=10)
-
-    def calculate_mgidi(self,data, trait_weights=None):
-        scaler = StandardScaler()
-        standardized_data = scaler.fit_transform(data)
-
-        pca = PCA()
-        pca_data = pca.fit_transform(standardized_data)
-        explained_variance = pca.explained_variance_ratio_
-
-        if trait_weights is None:
-            trait_weights = np.ones(len(data.columns)) / len(data.columns)
-
-        weights = explained_variance[:len(trait_weights)] * trait_weights
-        mgidi_scores = np.sum(np.abs(pca_data[:, :len(weights)]) * weights, axis=1)
-        return mgidi_scores, explained_variance, pca
-
-    def upload_file(self):
-        filepath = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
-        if filepath:
-            try:
-                global data
-                data = pd.read_csv(filepath)
-                messagebox.showinfo("File Loaded", "Dataset loaded successfully!")
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to load file: {e}")
-
-    def compute_mgidi(self,frame):
-        if 'data' not in globals():
-            messagebox.showerror("Error", "No dataset loaded. Please upload a dataset first.")
+        self.title(APP_TITLE)
+        self.geometry(WINDOW_SIZE)
+        self.minsize(820, 560)
+        self.configure(fg_color="#8B0000")
+
+        self.frames: dict[str, ctk.CTkFrame] = {}
+        self.selected_image_paths: list[pathlib.Path] = []
+        self.current_output_folder: pathlib.Path | None = None
+        self.selected_folder: pathlib.Path | None = None
+
+        self.model: Any | None = None
+        self.device: Any | None = None
+        self.stride: Any | None = None
+        self.names: Any | None = None
+        self.imgsz: tuple[int, int] | None = None
+
+        self._set_window_icon()
+        self._show_splash()
+
+    # ------------------------------------------------------------------
+    # General helpers
+    # ------------------------------------------------------------------
+    def _asset(self, filename: str) -> pathlib.Path:
+        return BASE_DIR / filename
+
+    def _set_window_icon(self) -> None:
+        icon_path = self._asset("orchid_logo.png")
+        if not icon_path.exists():
             return
 
         try:
-            # Example: Equal weights; can be customized.
-            trait_weights = [0.4, 0.3, 0.2, 0.1][:len(data.columns)]
-            mgidi_scores, explained_variance, _ = app.calculate_mgidi(data, trait_weights)
+            icon = tk.PhotoImage(file=str(icon_path))
+            self._window_icon_reference = icon
+            self.wm_iconphoto(True, icon)
+        except Exception:
+            # The application remains usable if the OS rejects the icon.
+            pass
 
-            # Display results in the GUI
-            result_window = tk.Toplevel(frame)
-            result_window.title("MGIDI Results")
+    @staticmethod
+    def _load_pil_image(path: pathlib.Path) -> Image.Image:
+        """Open an image, apply EXIF orientation, and return RGB."""
+        with Image.open(path) as source:
+            oriented = ImageOps.exif_transpose(source)
 
-            results_df = pd.DataFrame({
-                "Genotype": data.index,
-                "MGIDI Score": mgidi_scores
-            }).sort_values(by="MGIDI Score")
+            if oriented.mode in ("RGBA", "LA") or (
+                oriented.mode == "P" and "transparency" in oriented.info
+            ):
+                rgba = oriented.convert("RGBA")
+                background = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+                background.alpha_composite(rgba)
+                return background.convert("RGB")
 
-            tk.Label(result_window, text="MGIDI Scores", font=("Arial", 14)).pack()
-            text = tk.Text(result_window, wrap="word", width=60, height=20)
-            text.insert("1.0", results_df.to_string(index=False))
-            text.pack()
+            return oriented.convert("RGB")
 
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to compute MGIDI: {e}")
+    @staticmethod
+    def _fit_preview(image: Image.Image, max_size: tuple[int, int]) -> Image.Image:
+        """Return an aspect-ratio-preserving preview."""
+        preview = image.copy()
+        preview.thumbnail(max_size, Image.Resampling.LANCZOS)
+        return preview
 
-    def show_contact_us(self, frame):
-        # contact_window = tk.Toplevel(frame)
-        # contact_window.title("Contact Us")
-        # contact_window.geometry("400x300")
+    # ------------------------------------------------------------------
+    # Splash and navigation
+    # ------------------------------------------------------------------
+    def _show_splash(self) -> None:
+        self.splash_frame = ctk.CTkFrame(self, fg_color="#8B0000")
+        self.splash_frame.pack(fill="both", expand=True)
 
-        # Title
-        tk.Label(frame, text="Contact the Development Team", font=("Arial", 14)).pack(pady=10)
+        ctk.CTkLabel(
+            self.splash_frame,
+            text="Welcome to DnLC Application",
+            font=("Arial", 25, "bold"),
+            text_color="white",
+        ).pack(pady=(180, 30))
 
-        # Contact Information
-        team_members = [
-            {"name": "Dr. Chandan Kumar Deb", "designation": "Scientist","Email":"chandan.deb@icar.gov.in", "affiliation": "Division of Computer Applications, ICAR-IASRI, New Delhi-12"},
-            {"name": "Dr. Madhurima Das", "designation": "Scientist", "Email":"madhurima.das@icar.gov.in","affiliation": "Division of Plant Physiology,ICAR-IARI, New Delhi-12"},
-            {"name": "Dr. Sudeep Marwaha", "designation": "Principal Scientist & Head","Email":"sudeep@icar.gov.in", "affiliation": "Division of Computer Applications,ICAR-IASRI, New Delhi-12"},
+        self.splash_progress = ctk.CTkProgressBar(
+            self.splash_frame,
+            width=330,
+            height=18,
+            corner_radius=10,
+        )
+        self.splash_progress.pack(pady=20)
+        self.splash_progress.set(0)
+
+        self._advance_splash(0)
+
+    def _advance_splash(self, value: int) -> None:
+        if value <= 100:
+            self.splash_progress.set(value / 100)
+            self.after(15, lambda: self._advance_splash(value + 2))
+            return
+
+        self.splash_frame.destroy()
+        self._build_navigation()
+        self._create_frames()
+        self.show_frame("Home")
+
+    def _build_navigation(self) -> None:
+        self.nav_frame = ctk.CTkFrame(
+            self,
+            height=54,
+            fg_color="#6E0000",
+            corner_radius=0,
+        )
+        self.nav_frame.pack(fill="x", side="top")
+
+        nav_items = ("Home", "Leaf Count", "Old Count", "Contact Us")
+        for column, name in enumerate(nav_items):
+            button = ctk.CTkButton(
+                self.nav_frame,
+                text=name,
+                width=130,
+                font=("Arial", 14),
+                fg_color="#8B0000",
+                hover_color="#A52A2A",
+                command=lambda page=name: self.show_frame(page),
+            )
+            button.grid(row=0, column=column, padx=6, pady=10)
+
+        self.nav_frame.grid_columnconfigure(tuple(range(len(nav_items))), weight=1)
+
+        self.footer_frame = ctk.CTkFrame(
+            self,
+            fg_color="#8B0000",
+            corner_radius=0,
+        )
+        self.footer_frame.pack(side="bottom", fill="x")
+
+        left_logo = self._make_ctk_image("icar_logo.png", (48, 48))
+        right_logo = self._make_ctk_image("iasri_logo.png", (48, 48))
+
+        if left_logo is not None:
+            self.footer_left_logo = left_logo
+            ctk.CTkLabel(
+                self.footer_frame,
+                image=self.footer_left_logo,
+                text="",
+            ).pack(side="left", padx=12, pady=5)
+
+        ctk.CTkLabel(
+            self.footer_frame,
+            text=(
+                "DnLC: Dendrobium nobile Leaf Counter\n"
+                "ICAR–Indian Agricultural Statistics Research Institute, New Delhi"
+            ),
+            font=("Arial", 11),
+            text_color="white",
+            justify="center",
+        ).pack(side="left", expand=True, pady=7)
+
+        if right_logo is not None:
+            self.footer_right_logo = right_logo
+            ctk.CTkLabel(
+                self.footer_frame,
+                image=self.footer_right_logo,
+                text="",
+            ).pack(side="right", padx=12, pady=5)
+
+    def _make_ctk_image(
+        self,
+        filename: str,
+        size: tuple[int, int],
+    ) -> ctk.CTkImage | None:
+        path = self._asset(filename)
+        if not path.exists():
+            return None
+
+        try:
+            image = self._load_pil_image(path)
+            return ctk.CTkImage(
+                light_image=image,
+                dark_image=image,
+                size=size,
+            )
+        except Exception:
+            return None
+
+    def _create_frames(self) -> None:
+        creators = {
+            "Home": self._create_home_page,
+            "Leaf Count": self._create_leaf_count_page,
+            "Old Count": self._create_old_count_page,
+            "Contact Us": self._create_contact_page,
+        }
+
+        for name, creator in creators.items():
+            frame = ctk.CTkFrame(
+                self,
+                fg_color="white",
+                corner_radius=15,
+            )
+            self.frames[name] = frame
+            creator(frame)
+
+    def show_frame(self, name: str) -> None:
+        for frame in self.frames.values():
+            frame.pack_forget()
+
+        target = self.frames.get(name)
+        if target is None:
+            messagebox.showerror("Navigation Error", f"Page not found: {name}")
+            return
+
+        target.pack(fill="both", expand=True, padx=20, pady=18)
+
+        if name == "Old Count":
+            self._refresh_old_count_page()
+
+    # ------------------------------------------------------------------
+    # Home page
+    # ------------------------------------------------------------------
+    def _create_home_page(self, frame: ctk.CTkFrame) -> None:
+        ctk.CTkLabel(
+            frame,
+            text="DnLC: Dendrobium nobile Leaf Counter",
+            font=("Arial", 24, "bold"),
+            text_color="#4A0000",
+        ).pack(pady=(45, 18))
+
+        description = (
+            "DnLC is a YOLOv5-based desktop application for automated leaf "
+            "detection and counting in Dendrobium nobile plant images. "
+            "The application creates a separate output folder for every task "
+            "and saves annotated images, a CSV file, and task metadata."
+        )
+
+        ctk.CTkLabel(
+            frame,
+            text=description,
+            wraplength=650,
+            justify="center",
+            font=("Arial", 14),
+            text_color="black",
+        ).pack(pady=12)
+
+        settings_text = (
+            f"Validated confidence threshold: {CONFIDENCE_THRESHOLD:.2f}\n"
+            f"IoU threshold: {IOU_THRESHOLD:.2f}\n"
+            f"Inference size: {INFERENCE_SIZE} pixels"
+        )
+
+        ctk.CTkLabel(
+            frame,
+            text=settings_text,
+            font=("Arial", 13),
+            text_color="#555555",
+        ).pack(pady=18)
+
+        ctk.CTkButton(
+            frame,
+            text="Start a New Leaf Count",
+            width=240,
+            height=42,
+            fg_color="#8B0000",
+            hover_color="#A52A2A",
+            command=lambda: self.show_frame("Leaf Count"),
+        ).pack(pady=20)
+
+    # ------------------------------------------------------------------
+    # New leaf-count page
+    # ------------------------------------------------------------------
+    def _create_leaf_count_page(self, frame: ctk.CTkFrame) -> None:
+        ctk.CTkLabel(
+            frame,
+            text="New Leaf Count",
+            font=("Arial", 23, "bold"),
+            text_color="#4A0000",
+        ).pack(pady=(35, 20))
+
+        form = ctk.CTkFrame(frame, fg_color="#F3F3F3")
+        form.pack(fill="x", padx=80, pady=15)
+
+        ctk.CTkLabel(
+            form,
+            text="Species:",
+            font=("Arial", 15, "bold"),
+            text_color="black",
+        ).grid(row=0, column=0, padx=18, pady=20, sticky="w")
+
+        self.species_entry = ctk.CTkEntry(
+            form,
+            width=330,
+            font=("Arial", 14),
+        )
+        self.species_entry.insert(0, "Dendrobium nobile")
+        self.species_entry.grid(row=0, column=1, padx=18, pady=20, sticky="ew")
+        form.grid_columnconfigure(1, weight=1)
+
+        self.selected_images_label = ctk.CTkLabel(
+            frame,
+            text="No images selected",
+            font=("Arial", 13),
+            text_color="#555555",
+        )
+        self.selected_images_label.pack(pady=10)
+
+        ctk.CTkButton(
+            frame,
+            text="Select Plant Images",
+            width=230,
+            height=40,
+            fg_color="#8B0000",
+            hover_color="#A52A2A",
+            command=self._select_images,
+        ).pack(pady=8)
+
+        self.count_progress = ctk.CTkProgressBar(
+            frame,
+            width=380,
+            height=18,
+        )
+        self.count_progress.pack(pady=(24, 8))
+        self.count_progress.set(0)
+
+        self.count_status_label = ctk.CTkLabel(
+            frame,
+            text="Ready",
+            font=("Arial", 13),
+            text_color="#333333",
+        )
+        self.count_status_label.pack(pady=5)
+
+        self.count_button = ctk.CTkButton(
+            frame,
+            text="Count Leaves",
+            width=230,
+            height=42,
+            fg_color="#8B0000",
+            hover_color="#A52A2A",
+            state="disabled",
+            command=self._start_counting,
+        )
+        self.count_button.pack(pady=15)
+
+    def _select_images(self) -> None:
+        selected = filedialog.askopenfilenames(
+            title="Select Dendrobium plant images",
+            filetypes=[
+                ("Image files", "*.jpg *.jpeg *.png *.bmp *.tif *.tiff"),
+                ("All files", "*.*"),
+            ],
+        )
+
+        if not selected:
+            return
+
+        self.selected_image_paths = [pathlib.Path(path) for path in selected]
+        self.selected_images_label.configure(
+            text=f"{len(self.selected_image_paths)} image(s) selected"
+        )
+        self.count_button.configure(state="normal")
+        self.count_status_label.configure(text="Images selected; ready to count.")
+        self.count_progress.set(0)
+
+    def _start_counting(self) -> None:
+        if not self.selected_image_paths:
+            messagebox.showwarning(
+                "No Images",
+                "Please select at least one plant image.",
+            )
+            return
+
+        species = self.species_entry.get().strip() or "Dendrobium nobile"
+        timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_folder = COUNTS_DIR / f"Count_{timestamp}"
+        output_folder.mkdir(parents=True, exist_ok=False)
+        self.current_output_folder = output_folder
+
+        self._write_basic_info(output_folder, species)
+
+        self.count_button.configure(state="disabled")
+        self.count_progress.set(0)
+        self.count_progress.start()
+        self.count_status_label.configure(text="Loading model and counting leaves...")
+
+        worker = threading.Thread(
+            target=self._count_worker,
+            args=(list(self.selected_image_paths), output_folder),
+            daemon=True,
+        )
+        worker.start()
+
+    def _write_basic_info(
+        self,
+        output_folder: pathlib.Path,
+        species: str,
+    ) -> None:
+        info_path = output_folder / "basic_info.txt"
+        lines = [
+            f"TASK ID: {output_folder.name}",
+            f"SPECIES: {species}",
+            f"NUMBER OF IMAGES: {len(self.selected_image_paths)}",
+            f"CONFIDENCE THRESHOLD: {CONFIDENCE_THRESHOLD:.2f}",
+            f"IOU THRESHOLD: {IOU_THRESHOLD:.2f}",
+            f"INFERENCE SIZE: {INFERENCE_SIZE}",
+            f"YOLOV5 COMMIT: 46d9a3c48ee08c5d2c9cb1a827d5462d1b24527c",
         ]
+        info_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-        for member in team_members:
-            contact_info = f"Name: {member['name']}\nDesignation: {member['designation']}\nE-mail: {member['Email']}\nAffiliation: {member['affiliation']}\n"
-            ctk.CTkLabel(frame, text=contact_info, justify="left", padx=10, font=("Arial", 10)).pack(anchor="w", pady=5)
+        (BASE_DIR / "current_folder.txt").write_text(
+            str(output_folder),
+            encoding="utf-8",
+        )
 
-    # Function for the main home page
-    def go_to_home(self,frame):
-        # Clear the window
-        for widget in frame.winfo_children():
+    # ------------------------------------------------------------------
+    # YOLOv5 inference
+    # ------------------------------------------------------------------
+    def _load_model(self) -> None:
+        """Load YOLOv5 once and reuse it for all images."""
+        if self.model is not None:
+            return
+
+        if not YOLOV5_DIR.is_dir():
+            raise FileNotFoundError(
+                f"YOLOv5 source folder not found:\n{YOLOV5_DIR}"
+            )
+        if not WEIGHTS_PATH.is_file():
+            raise FileNotFoundError(
+                f"Model weights not found:\n{WEIGHTS_PATH}"
+            )
+
+        if str(YOLOV5_DIR) not in sys.path:
+            sys.path.insert(0, str(YOLOV5_DIR))
+
+        from models.common import DetectMultiBackend
+        from utils.general import check_img_size
+        from utils.torch_utils import select_device
+
+        self.device = select_device("cpu")
+        self.model = DetectMultiBackend(
+            str(WEIGHTS_PATH),
+            device=self.device,
+            dnn=False,
+            data=str(DATA_YAML_PATH),
+        )
+        self.stride = self.model.stride
+        self.names = self.model.names
+        self.imgsz = check_img_size(
+            (INFERENCE_SIZE, INFERENCE_SIZE),
+            s=self.stride,
+        )
+
+    def _infer_one(
+        self,
+        image_path: pathlib.Path,
+    ) -> tuple[np.ndarray, int]:
+        """Run leaf detection while preserving original image dimensions."""
+        self._load_model()
+
+        from utils.augmentations import letterbox
+        from utils.general import non_max_suppression, scale_boxes
+        from utils.plots import Annotator, colors
+
+        original = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+        if original is None:
+            raise ValueError(f"Could not read image: {image_path}")
+
+        original_height, original_width = original.shape[:2]
+
+        resized = letterbox(
+            original,
+            new_shape=self.imgsz,
+            stride=self.stride,
+            auto=True,
+        )[0]
+
+        input_array = resized.transpose((2, 0, 1))[::-1]
+        input_array = np.ascontiguousarray(input_array)
+
+        tensor = (
+            __import__("torch")
+            .from_numpy(input_array)
+            .to(self.device)
+            .float()
+            / 255.0
+        )
+        if tensor.ndim == 3:
+            tensor = tensor.unsqueeze(0)
+
+        torch_module = __import__("torch")
+        with torch_module.inference_mode():
+            raw_prediction = self.model(
+                tensor,
+                augment=False,
+                visualize=False,
+            )
+
+        if isinstance(raw_prediction, (list, tuple)):
+            prediction_tensor = raw_prediction[0]
+        else:
+            prediction_tensor = raw_prediction
+
+        predictions = non_max_suppression(
+            prediction_tensor,
+            conf_thres=CONFIDENCE_THRESHOLD,
+            iou_thres=IOU_THRESHOLD,
+            classes=[0],
+            agnostic=False,
+            max_det=MAX_DETECTIONS,
+        )
+
+        detections = predictions[0]
+        annotated = original.copy()
+        line_width = max(2, round(max(original_height, original_width) * 0.003))
+        annotator = Annotator(
+            annotated,
+            line_width=line_width,
+            example=str(self.names),
+        )
+
+        if len(detections):
+            detections[:, :4] = scale_boxes(
+                tensor.shape[2:],
+                detections[:, :4],
+                original.shape,
+            ).round()
+
+            for *xyxy, confidence, class_id in reversed(detections):
+                class_index = int(class_id)
+                label = f"{self.names[class_index]} {float(confidence):.2f}"
+                annotator.box_label(
+                    xyxy,
+                    label,
+                    color=colors(class_index, True),
+                )
+
+        annotated = annotator.result()
+        count = int(len(detections))
+
+        cv2.putText(
+            annotated,
+            f"Leaf Count: {count}",
+            (12, 28),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.65,
+            (0, 0, 255),
+            2,
+            cv2.LINE_AA,
+        )
+
+        # Geometry guard: the saved image must match the source dimensions.
+        if annotated.shape[:2] != original.shape[:2]:
+            raise RuntimeError(
+                "Output geometry changed unexpectedly: "
+                f"input={original.shape[:2]}, output={annotated.shape[:2]}"
+            )
+
+        return annotated, count
+
+    def _count_worker(
+        self,
+        image_paths: list[pathlib.Path],
+        output_folder: pathlib.Path,
+    ) -> None:
+        results: list[CountResult] = []
+
+        try:
+            total = len(image_paths)
+
+            for index, image_path in enumerate(image_paths, start=1):
+                annotated, count = self._infer_one(image_path)
+
+                output_name = f"{image_path.stem}_counted.png"
+                output_path = output_folder / output_name
+
+                if not cv2.imwrite(str(output_path), annotated):
+                    raise OSError(f"Could not save output image: {output_path}")
+
+                results.append(
+                    CountResult(
+                        image_name=image_path.name,
+                        leaf_count=count,
+                        output_file=output_name,
+                    )
+                )
+
+                progress = index / total
+                self.after(
+                    0,
+                    lambda p=progress, n=image_path.name, c=count:
+                    self._update_count_progress(p, n, c),
+                )
+
+            self._write_results_csv(output_folder, results)
+
+            self.after(
+                0,
+                lambda: self._counting_completed(output_folder, results),
+            )
+
+        except Exception as error:
+            traceback.print_exc()
+            self.after(
+                0,
+                lambda exc=error: self._counting_failed(exc),
+            )
+
+    @staticmethod
+    def _write_results_csv(
+        output_folder: pathlib.Path,
+        results: list[CountResult],
+    ) -> None:
+        csv_path = output_folder / "leaf_count_results.csv"
+        with csv_path.open("w", newline="", encoding="utf-8") as stream:
+            writer = csv.DictWriter(
+                stream,
+                fieldnames=["Image", "Leaf Count", "Output File"],
+            )
+            writer.writeheader()
+            for result in results:
+                writer.writerow(
+                    {
+                        "Image": result.image_name,
+                        "Leaf Count": result.leaf_count,
+                        "Output File": result.output_file,
+                    }
+                )
+
+    def _update_count_progress(
+        self,
+        progress: float,
+        image_name: str,
+        count: int,
+    ) -> None:
+        self.count_progress.set(progress)
+        self.count_status_label.configure(
+            text=f"{image_name}: {count} leaf/leaves detected"
+        )
+
+    def _counting_completed(
+        self,
+        output_folder: pathlib.Path,
+        results: list[CountResult],
+    ) -> None:
+        self.count_progress.stop()
+        self.count_progress.set(1)
+        self.count_button.configure(state="normal")
+
+        total_count = sum(result.leaf_count for result in results)
+        self.count_status_label.configure(
+            text=(
+                f"Completed: {len(results)} image(s), "
+                f"{total_count} total detected leaves"
+            )
+        )
+
+        summary = "\n".join(
+            f"{result.image_name}: {result.leaf_count}"
+            for result in results
+        )
+
+        messagebox.showinfo(
+            "Leaf Counting Completed",
+            f"Leaf counting completed successfully.\n\n"
+            f"{summary}\n\n"
+            f"Results saved to:\n{output_folder}",
+        )
+
+        self._refresh_old_count_page()
+
+    def _counting_failed(self, error: Exception) -> None:
+        self.count_progress.stop()
+        self.count_progress.set(0)
+        self.count_button.configure(state="normal")
+        self.count_status_label.configure(text="Counting failed.")
+
+        messagebox.showerror(
+            "Leaf Counting Error",
+            f"Leaf counting could not be completed.\n\n{error}",
+        )
+
+    # ------------------------------------------------------------------
+    # Old-count browser
+    # ------------------------------------------------------------------
+    def _create_old_count_page(self, frame: ctk.CTkFrame) -> None:
+        header = ctk.CTkFrame(frame, fg_color="transparent")
+        header.pack(fill="x", padx=15, pady=(15, 8))
+
+        ctk.CTkLabel(
+            header,
+            text="Previous Count Results",
+            font=("Arial", 22, "bold"),
+            text_color="#4A0000",
+        ).pack(side="left", padx=5)
+
+        ctk.CTkButton(
+            header,
+            text="Open Counts Folder",
+            width=160,
+            fg_color="#8B0000",
+            hover_color="#A52A2A",
+            command=lambda: self._open_path(COUNTS_DIR),
+        ).pack(side="right", padx=5)
+
+        body = ctk.CTkFrame(frame, fg_color="#F5F5F5")
+        body.pack(fill="both", expand=True, padx=15, pady=(5, 15))
+
+        self.tasks_listbox = tk.Listbox(
+            body,
+            width=28,
+            bg="#262626",
+            fg="white",
+            selectbackground="#8B0000",
+            borderwidth=0,
+            highlightthickness=0,
+            font=("Arial", 12),
+        )
+        self.tasks_listbox.pack(
+            side="left",
+            fill="y",
+            padx=(10, 5),
+            pady=10,
+        )
+        self.tasks_listbox.bind(
+            "<<ListboxSelect>>",
+            self._on_task_selected,
+        )
+
+        self.files_listbox = tk.Listbox(
+            body,
+            width=32,
+            bg="#333333",
+            fg="white",
+            selectbackground="#8B0000",
+            borderwidth=0,
+            highlightthickness=0,
+            font=("Arial", 12),
+        )
+        self.files_listbox.pack(
+            side="left",
+            fill="y",
+            padx=5,
+            pady=10,
+        )
+        self.files_listbox.bind(
+            "<<ListboxSelect>>",
+            self._on_result_file_selected,
+        )
+
+        self.preview_frame = ctk.CTkFrame(body, fg_color="white")
+        self.preview_frame.pack(
+            side="left",
+            fill="both",
+            expand=True,
+            padx=(5, 10),
+            pady=10,
+        )
+
+        self.preview_label = ctk.CTkLabel(
+            self.preview_frame,
+            text="Select a task and output file",
+            text_color="#333333",
+        )
+        self.preview_label.pack(expand=True, fill="both", padx=10, pady=10)
+
+    def _refresh_old_count_page(self) -> None:
+        if not hasattr(self, "tasks_listbox"):
+            return
+
+        COUNTS_DIR.mkdir(parents=True, exist_ok=True)
+        self.tasks_listbox.delete(0, tk.END)
+        self.files_listbox.delete(0, tk.END)
+        self.selected_folder = None
+
+        task_folders = sorted(
+            [
+                path
+                for path in COUNTS_DIR.iterdir()
+                if path.is_dir() and path.name.startswith("Count_")
+            ],
+            reverse=True,
+        )
+
+        self._task_paths = task_folders
+        for folder in task_folders:
+            self.tasks_listbox.insert(tk.END, folder.name)
+
+    def _on_task_selected(self, _event: tk.Event) -> None:
+        selection = self.tasks_listbox.curselection()
+        if not selection:
+            return
+
+        index = selection[0]
+        self.selected_folder = self._task_paths[index]
+
+        self.files_listbox.delete(0, tk.END)
+        files = sorted(
+            [
+                path
+                for path in self.selected_folder.iterdir()
+                if path.suffix.lower()
+                in {".png", ".jpg", ".jpeg", ".txt", ".csv"}
+            ]
+        )
+
+        self._result_paths = files
+        for path in files:
+            self.files_listbox.insert(tk.END, path.name)
+
+    def _clear_preview(self) -> None:
+        for widget in self.preview_frame.winfo_children():
             widget.destroy()
 
-        # Title
-        tk.Label(frame, text="Welcome to DnLC(Denodrobium Nobile Leaf Count)", font=("Arial", 18, "bold")).pack(pady=10)
+    def _on_result_file_selected(self, _event: tk.Event) -> None:
+        selection = self.files_listbox.curselection()
+        if not selection:
+            return
 
-        # Description
-        description = """
-        DnLC (Dendrobium nobile Leaf Counter) is a specialized application designed
-        to analyze phenomics data related to leaf counting in Dendrobium nobile species.
-        It allows users to efficiently process and compute MGIDI (Under Developomet)values for assessing traits
-        associated with leaf analysis and crop phenotyping.
-        """
-        tk.Label(frame, text=description, wraplength=350, justify="center", font=("Arial", 10)).pack(pady=10)
+        path = self._result_paths[selection[0]]
+        self._clear_preview()
 
-        # Features
-        tk.Label(frame, text="Key Features", font=("Arial", 14)).pack(pady=5)
+        if path.suffix.lower() in {".png", ".jpg", ".jpeg"}:
+            image = self._load_pil_image(path)
+            preview = self._fit_preview(image, (500, 390))
+            ctk_image = ctk.CTkImage(
+                light_image=preview,
+                dark_image=preview,
+                size=preview.size,
+            )
+            label = ctk.CTkLabel(
+                self.preview_frame,
+                image=ctk_image,
+                text="",
+            )
+            label.image = ctk_image
+            label.pack(expand=True, padx=10, pady=10)
+            return
 
-        features_list = [
-            "✅ Upload your phenomics datasets.",
-            "✅ Perform MGIDI computation.",
-            "✅ Visualize trait indices.",
-            "✅ View team contact information."
+        content = path.read_text(encoding="utf-8", errors="replace")
+        text_box = ctk.CTkTextbox(
+            self.preview_frame,
+            wrap="word",
+        )
+        text_box.insert("1.0", content)
+        text_box.configure(state="disabled")
+        text_box.pack(fill="both", expand=True, padx=10, pady=10)
+
+    @staticmethod
+    def _open_path(path: pathlib.Path) -> None:
+        path.mkdir(parents=True, exist_ok=True)
+
+        try:
+            system = platform.system()
+            if system == "Windows":
+                os.startfile(str(path))  # type: ignore[attr-defined]
+            elif system == "Darwin":
+                subprocess.run(["open", str(path)], check=True)
+            else:
+                subprocess.run(["xdg-open", str(path)], check=True)
+        except Exception as error:
+            messagebox.showerror(
+                "Open Folder Error",
+                f"Could not open:\n{path}\n\n{error}",
+            )
+
+    # ------------------------------------------------------------------
+    # Contact page
+    # ------------------------------------------------------------------
+    def _create_contact_page(self, frame: ctk.CTkFrame) -> None:
+        ctk.CTkLabel(
+            frame,
+            text="Contact the Development Team",
+            font=("Arial", 23, "bold"),
+            text_color="#4A0000",
+        ).pack(pady=(35, 25))
+
+        contacts = [
+            (
+                "Dr. Chandan Kumar Deb",
+                "Scientist, Division of Computer Applications, "
+                "ICAR–IASRI, New Delhi",
+                "chandan.deb@icar.gov.in",
+            ),
+            (
+                "Dr. Madhurima Das",
+                "Scientist, Division of Plant Physiology, "
+                "ICAR–IARI, New Delhi",
+                "madhurima.das@icar.gov.in",
+            ),
+            (
+                "Dr. Sudeep Marwaha",
+                "Principal Scientist and Head, Division of Computer Applications, "
+                "ICAR–IASRI, New Delhi",
+                "sudeep@icar.gov.in",
+            ),
         ]
 
-        for feature in features_list:
-            tk.Label(frame, text=feature, font=("Arial", 10)).pack(anchor="w", padx=20)
+        for name, affiliation, email in contacts:
+            card = ctk.CTkFrame(frame, fg_color="#F2F2F2")
+            card.pack(fill="x", padx=90, pady=8)
 
-    def open_folder_new(self):
-        folder_path = "Counts"  # Change to your specific folder
-        os.startfile(folder_path)  # Opens the folder in File Explorer (Windows)
+            ctk.CTkLabel(
+                card,
+                text=name,
+                font=("Arial", 15, "bold"),
+                text_color="#4A0000",
+            ).pack(anchor="w", padx=16, pady=(12, 3))
 
-    def start_analysis(self,folder_path):
-        self.progress_bar.set(0)  # Reset progress bar
-        self.progress_bar.start()  # Start progress animation
+            ctk.CTkLabel(
+                card,
+                text=f"{affiliation}\nEmail: {email}",
+                font=("Arial", 12),
+                text_color="black",
+                justify="left",
+                wraplength=620,
+            ).pack(anchor="w", padx=16, pady=(0, 12))
 
-        # Run analyze_image in a separate thread
-        analysis_thread = threading.Thread(target=self.analyze_image(folder_path))
-        analysis_thread.start()
-if __name__ == "__main__":
+
+def main() -> None:
+    ctk.set_appearance_mode("System")
+    ctk.set_default_color_theme("blue")
+
     app = App()
     app.mainloop()
+
+
+if __name__ == "__main__":
+    main()
