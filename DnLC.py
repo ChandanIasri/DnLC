@@ -661,8 +661,6 @@ class App(ctk.CTk):
             stride, names, pt, jit, onnx, engine = model.stride, model.names, model.pt, model.jit, model.onnx, model.engine
             imgsz = check_img_size((640, 640), s=stride)  # check image size
 
-            dataset = LoadImages('./me.jpg', img_size=imgsz, stride=stride, auto=pt)
-
             def draw_rect(image, points):
                 x1 = int(points[0])
                 y1 = int(points[1])
