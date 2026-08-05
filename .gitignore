@@ -1,0 +1,22 @@
+
+# macOS
+.DS_Store
+
+# PyCharm
+.idea/
+
+# DnLC generated outputs
+Counts/
+current_folder.txt
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# PyInstaller generated files
+build/
+dist/
+*.spec
+
+# YOLO generated outputs
+runs/
