@@ -35,7 +35,7 @@ class App(ctk.CTk):
         # self.resizable(False, False)
 
         # Set window icon (PNG format)
-        icon = tk.PhotoImage(file="icon.png")  # Replace with your icon path
+        icon = tk.PhotoImage(file="orchid_logo.png")  # Replace with your icon path
         self.wm_iconphoto(True, icon)
         # Splash Screen Setup
         self.splash_screen()
@@ -743,7 +743,7 @@ class App(ctk.CTk):
                     # Process predictions
                     for i, det in enumerate(pred):  # per image
                         seen += 1
-                        p, im0, frame = 'Leaf.jpg', img0.copy(), getattr(dataset, 'frame', 0)
+                        p, im0, frame = "Leaf.jpg", img0.copy(), 0
 
                         p = Path(p)  # to Path
                         imc = im0.copy() if save_crop else im0  # for save_crop
