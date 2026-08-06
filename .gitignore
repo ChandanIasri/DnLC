@@ -20,3 +20,13 @@ dist/
 
 # YOLO generated outputs
 runs/
+DnLC_before_release_fixes.py
+
+# Local diagnostics
+diagnose_dnlc.py
+diagnose_dnlc*.py
+diagnostic_outputs/
+
+# Local code backups
+DnLC_*backup.py
+DnLC_before*.py
