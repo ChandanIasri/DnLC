@@ -41,3 +41,6 @@ openpyxl>=3.0.9,<4.0.0
 
 # Optional experiment tracking and visualization
 tensorboard>=2.7.0,<3.0.0
+
+# Required by pinned YOLOv5 for pkg_resources
+setuptools<81
