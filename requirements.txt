@@ -1,5 +1,5 @@
 # DnLC: Automated Leaf Counting in Dendrobium nobile using YOLOv5
-# Recommended Python version: 3.8-3.10
+# Recommended Python version: 3.10 or later; tested with Python 3.13.0
 #
 # Install with:
 #   python -m pip install --upgrade pip

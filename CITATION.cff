@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use DnLC, please cite this software and the associated publication."
+title: "DnLC: Automated Leaf Counting in Dendrobium nobile Using YOLOv5"
+type: software
+version: 1.0.0
+license: GPL-3.0-only
+authors:
+  - family-names: "Deb"
+    given-names: "Chandan Kumar"
+    affiliation: "ICAR–Indian Agricultural Statistics Research Institute"
+repository-code: "https://github.com/ChandanIasri/DnLC"
+url: "https://github.com/ChandanIasri/DnLC"
+abstract: >-
+  DnLC is a YOLOv5-based desktop application for automated detection and
+  counting of leaves in Dendrobium nobile plant images. The software provides
+  batch image processing, annotated outputs, image-wise leaf counts, and CSV
+  export through a CustomTkinter graphical interface.
+keywords:
+  - "Dendrobium nobile"
+  - "leaf counting"
+  - "plant phenotyping"
+  - "YOLOv5"
+  - "computer vision"
+  - "deep learning"
